@@ -23,8 +23,8 @@ INTERVAL_MAP: dict[str, str] = {
 }
 
 # Hanya simbol berikut yang didukung:
-# - Input simbol bisa berupa "XAUUSD" atau "XAU/USD" -> dinormalisasi ke "XAUUSD"
-# - Input simbol "BTC/USD" -> dipertahankan sebagai "BTC/USD"
+# - Input "XAUUSD" atau "XAU/USD" -> dinormalisasi ke "XAUUSD"
+# - Input "BTC/USD" -> dipertahankan sebagai "BTC/USD"
 SUPPORTED_SYMBOLS: dict[str, str] = {
     "XAUUSD": "XAUUSD",
     "XAU/USD": "XAUUSD",
@@ -64,12 +64,12 @@ class TwelveDataAdapter:
 
     @staticmethod
     def _resolve_symbol(symbol: str) -> str:
-        normalized = symbol.strip().upper()
-        if normalized not in SUPPORTED_SYMBOLS:
+        cleaned = symbol.strip().strip('"').strip("'").strip().upper()
+        if cleaned not in SUPPORTED_SYMBOLS:
             raise TwelveDataError(
-                f"Simbol tidak didukung: {symbol}. Hanya mendukung XAUUSD dan BTC/USD."
+                f"Simbol tidak didukung: {symbol!r}. Hanya mendukung XAUUSD dan BTC/USD."
             )
-        return SUPPORTED_SYMBOLS[normalized]
+        return SUPPORTED_SYMBOLS[cleaned]
 
     # ------------------------------------------------------------------
     # Public API
