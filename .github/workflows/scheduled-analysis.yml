@@ -16,7 +16,7 @@ on:
         description: "Chat ID Telegram tujuan (kosongkan untuk pakai ALLOWED_CHAT_IDS)"
         required: false
         type: string
-  # Opsional: jadwal otomatis tiap 4 jam.
+  # Jadwal otomatis tiap 4 jam.
   schedule:
     - cron: "0 */4 * * *"
 
@@ -45,8 +45,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ALLOWED_CHAT_IDS: ${{ secrets.ALLOWED_CHAT_IDS }}
         run: |
-          ARGS="--symbol \"$SYMBOL\""
+          CMD=(./venv/bin/python -m bot.run_analysis --symbol "$SYMBOL")
           if [ -n "$CHAT_ID" ]; then
-            ARGS="$ARGS --chat-id \"$CHAT_ID\""
+            CMD+=(--chat-id "$CHAT_ID")
           fi
-          ./venv/bin/python -m bot.run_analysis $ARGS
+          "${CMD[@]}"
