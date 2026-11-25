@@ -1,0 +1,52 @@
+name: Analisis SMC
+
+on:
+  # Jalankan langsung dari tab Actions -> "Run workflow" (pilih simbol).
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "Simbol market yang dianalisis"
+        required: true
+        default: "XAU/USD"
+        type: choice
+        options:
+          - XAU/USD
+          - BTC/USD
+      chat_id:
+        description: "Chat ID Telegram tujuan (kosongkan untuk pakai ALLOWED_CHAT_IDS)"
+        required: false
+        type: string
+  # Opsional: jadwal otomatis tiap 4 jam.
+  schedule:
+    - cron: "0 */4 * * *"
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    env:
+      SYMBOL: ${{ github.event.inputs.symbol || 'XAU/USD' }}
+      CHAT_ID: ${{ github.event.inputs.chat_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          ./venv/bin/pip install --upgrade pip
+          ./venv/bin/pip install -r requirements.txt
+
+      - name: Jalankan analisis & kirim ke Telegram
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ALLOWED_CHAT_IDS: ${{ secrets.ALLOWED_CHAT_IDS }}
+        run: |
+          ARGS="--symbol \"$SYMBOL\""
+          if [ -n "$CHAT_ID" ]; then
+            ARGS="$ARGS --chat-id \"$CHAT_ID\""
+          fi
+          ./venv/bin/python -m bot.run_analysis $ARGS
