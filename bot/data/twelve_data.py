@@ -1,9 +1,4 @@
-"""Adapter Twelve Data API.
-
-Abstraksi sumber data OHLC. Interface ini yang dipakai oleh seluruh
-mesin analisis; jika nanti ingin mengganti penyedia data, cukup buat
-adapter baru dengan interface yang sama tanpa menyentuh modul analisis.
-"""
+"""Adapter Twelve Data API (dikunci langsung ke XAU/USD)."""
 from __future__ import annotations
 
 import time
@@ -15,21 +10,13 @@ import requests
 from bot.config.settings import settings
 from bot.models.candle import Candle
 
-# Interval yang didukung Twelve Data (dipetakan dari nama internal bot)
 INTERVAL_MAP: dict[str, str] = {
     "4h": "4h",
     "1h": "1h",
     "15min": "15min",
 }
 
-# Hanya simbol berikut yang didukung:
-# - Input "XAUUSD" atau "XAU/USD" -> dinormalisasi ke "XAUUSD"
-# - Input "BTC/USD" -> dipertahankan sebagai "BTC/USD"
-SUPPORTED_SYMBOLS: dict[str, str] = {
-    "XAUUSD": "XAUUSD",
-    "XAU/USD": "XAUUSD",
-    "BTC/USD": "BTC/USD",
-}
+FIXED_SYMBOL = "XAU/USD"
 
 
 class TwelveDataError(Exception):
@@ -45,7 +32,7 @@ class TwelveDataAuthError(TwelveDataError):
 
 
 class TwelveDataAdapter:
-    """Adapter untuk endpoint time_series Twelve Data."""
+    """Adapter untuk endpoint time_series Twelve Data (khusus XAU/USD)."""
 
     def __init__(
         self,
@@ -57,37 +44,23 @@ class TwelveDataAdapter:
         self.api_key = (api_key or settings.TWELVE_DATA_API_KEY).strip()
         if not self.api_key:
             raise TwelveDataError("TWELVE_DATA_API_KEY belum diatur (lihat .env.example)")
-        self.base_url = base_url or settings.TWELVE_API_BASE
+        self.base_url = (base_url or settings.TWELVE_API_BASE).rstrip("/")
         self.timeout = timeout if timeout is not None else settings.TWELVE_TIMEOUT
         self.max_retries = max_retries if max_retries is not None else settings.TWELVE_MAX_RETRIES
         self._session = requests.Session()
 
-    @staticmethod
-    def _resolve_symbol(symbol: str) -> str:
-        cleaned = symbol.strip().strip('"').strip("'").strip().upper()
-        if cleaned not in SUPPORTED_SYMBOLS:
-            raise TwelveDataError(
-                f"Simbol tidak didukung: {symbol!r}. Hanya mendukung XAUUSD dan BTC/USD."
-            )
-        return SUPPORTED_SYMBOLS[cleaned]
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
     def fetch_time_series(
         self,
-        symbol: str,
-        interval: str,
+        symbol: str = FIXED_SYMBOL,
+        interval: str = "4h",
         outputsize: int = 300,
     ) -> list[Candle]:
-        """Ambil deret waktu OHLC sebagai list Candle (sudah diurutkan naik)."""
+        """Ambil deret waktu OHLC XAU/USD sebagai list Candle (sudah diurutkan naik)."""
         if interval not in INTERVAL_MAP:
             raise TwelveDataError(f"Interval tidak didukung: {interval}")
 
-        api_symbol = self._resolve_symbol(symbol)
-
         params = {
-            "symbol": api_symbol,
+            "symbol": FIXED_SYMBOL,
             "interval": INTERVAL_MAP[interval],
             "outputsize": outputsize,
             "apikey": self.api_key,
@@ -98,7 +71,7 @@ class TwelveDataAdapter:
         values = payload.get("values")
         if not isinstance(values, list) or not values:
             raise TwelveDataError(
-                f"Tidak ada data OHLC untuk {symbol} {interval} "
+                f"Tidak ada data OHLC untuk {FIXED_SYMBOL} {interval} "
                 f"(status={payload.get('status')!r})"
             )
 
@@ -106,7 +79,7 @@ class TwelveDataAdapter:
         for row in values:
             ts = self._parse_timestamp(row.get("datetime"))
             if ts is None:
-                raise TwelveDataError(f"Timestamp tidak valid pada data {symbol} {interval}")
+                raise TwelveDataError(f"Timestamp tidak valid pada data {FIXED_SYMBOL} {interval}")
             try:
                 candle = Candle(
                     timestamp=ts,
@@ -119,19 +92,16 @@ class TwelveDataAdapter:
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 raise TwelveDataError(
-                    f"Field OHLC tidak lengkap pada {symbol} {interval}: {exc}"
+                    f"Field OHLC tidak lengkap pada {FIXED_SYMBOL} {interval}: {exc}"
                 ) from exc
             if not candle.is_valid():
                 raise TwelveDataError(
-                    f"Candle tidak valid pada {symbol} {interval} di {ts}"
+                    f"Candle tidak valid pada {FIXED_SYMBOL} {interval} di {ts}"
                 )
             candles.append(candle)
 
         return candles
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
     def _request_with_retry(self, params: dict) -> dict:
         last_exc: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
