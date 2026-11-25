@@ -22,6 +22,13 @@ INTERVAL_MAP: dict[str, str] = {
     "15min": "15min",
 }
 
+# Mapping simbol display -> simbol API Twelve Data
+# Twelve Data kadang butuh format tanpa slash untuk komoditas/forex tertentu
+SYMBOL_MAP: dict[str, str] = {
+    "XAU/USD": "XAUUSD",
+    "BTC/USD": "BTC/USD",  # crypto biasanya pakai slash
+}
+
 
 class TwelveDataError(Exception):
     """Error umum dari Twelve Data."""
@@ -66,8 +73,11 @@ class TwelveDataAdapter:
         if interval not in INTERVAL_MAP:
             raise TwelveDataError(f"Interval tidak didukung: {interval}")
 
+        # Konversi simbol ke format API Twelve Data
+        api_symbol = SYMBOL_MAP.get(symbol, symbol)
+
         params = {
-            "symbol": symbol,
+            "symbol": api_symbol,
             "interval": INTERVAL_MAP[interval],
             "outputsize": outputsize,
             "apikey": self.api_key,
@@ -87,81 +97,4 @@ class TwelveDataAdapter:
             ts = self._parse_timestamp(row.get("datetime"))
             if ts is None:
                 raise TwelveDataError(f"Timestamp tidak valid pada data {symbol} {interval}")
-            try:
-                candle = Candle(
-                    timestamp=ts,
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=float(row["close"]),
-                    volume=float(row.get("volume") or 0.0),
-                    is_closed=True,
-                )
-            except (KeyError, TypeError, ValueError) as exc:
-                raise TwelveDataError(
-                    f"Field OHLC tidak lengkap pada {symbol} {interval}: {exc}"
-                ) from exc
-            if not candle.is_valid():
-                raise TwelveDataError(
-                    f"Candle tidak valid pada {symbol} {interval} di {ts}"
-                )
-            candles.append(candle)
-
-        return candles
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-    def _request_with_retry(self, params: dict) -> dict:
-        last_exc: Optional[Exception] = None
-        for attempt in range(self.max_retries + 1):
-            try:
-                resp = self._session.get(
-                    f"{self.base_url}/time_series",
-                    params=params,
-                    timeout=self.timeout,
-                )
-            except requests.RequestException as exc:
-                last_exc = exc
-                if attempt < self.max_retries:
-                    time.sleep(1.0 * (attempt + 1))
-                    continue
-                break
-
-            if resp.status_code == 200:
-                return resp.json()
-
-            if resp.status_code == 401:
-                raise TwelveDataAuthError("API key Twelve Data tidak valid (401)")
-            if resp.status_code == 429:
-                raise TwelveDataRateLimitError("Rate limit / kuota Twelve Data tercapai (429)")
-            if resp.status_code == 403:
-                raise TwelveDataAuthError("Akses ditolak Twelve Data (403)")
-
-            # Error lain: baca body untuk pesan
-            try:
-                data = resp.json()
-            except ValueError:
-                data = {}
-            msg = data.get("message") or data.get("error") or resp.text[:200]
-            last_exc = TwelveDataError(f"Twelve Data HTTP {resp.status_code}: {msg}")
-            if attempt < self.max_retries:
-                time.sleep(1.0 * (attempt + 1))
-                continue
-            break
-
-        if isinstance(last_exc, TwelveDataError):
-            raise last_exc
-        raise TwelveDataError(f"Gagal menghubungi Twelve Data: {last_exc}")
-
-    @staticmethod
-    def _parse_timestamp(raw) -> Optional[datetime]:
-        if not raw:
-            return None
-        raw = str(raw).strip()
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(raw, fmt)
-            except ValueError:
-                continue
-        return None
+            try
