@@ -97,4 +97,81 @@ class TwelveDataAdapter:
             ts = self._parse_timestamp(row.get("datetime"))
             if ts is None:
                 raise TwelveDataError(f"Timestamp tidak valid pada data {symbol} {interval}")
-            try
+            try:
+                candle = Candle(
+                    timestamp=ts,
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                    volume=float(row.get("volume") or 0.0),
+                    is_closed=True,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise TwelveDataError(
+                    f"Field OHLC tidak lengkap pada {symbol} {interval}: {exc}"
+                ) from exc
+            if not candle.is_valid():
+                raise TwelveDataError(
+                    f"Candle tidak valid pada {symbol} {interval} di {ts}"
+                )
+            candles.append(candle)
+
+        return candles
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _request_with_retry(self, params: dict) -> dict:
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = self._session.get(
+                    f"{self.base_url}/time_series",
+                    params=params,
+                    timeout=self.timeout,
+                )
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt < self.max_retries:
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                break
+
+            if resp.status_code == 200:
+                return resp.json()
+
+            if resp.status_code == 401:
+                raise TwelveDataAuthError("API key Twelve Data tidak valid (401)")
+            if resp.status_code == 429:
+                raise TwelveDataRateLimitError("Rate limit / kuota Twelve Data tercapai (429)")
+            if resp.status_code == 403:
+                raise TwelveDataAuthError("Akses ditolak Twelve Data (403)")
+
+            # Error lain: baca body untuk pesan
+            try:
+                data = resp.json()
+            except ValueError:
+                data = {}
+            msg = data.get("message") or data.get("error") or resp.text[:200]
+            last_exc = TwelveDataError(f"Twelve Data HTTP {resp.status_code}: {msg}")
+            if attempt < self.max_retries:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            break
+
+        if isinstance(last_exc, TwelveDataError):
+            raise last_exc
+        raise TwelveDataError(f"Gagal menghubungi Twelve Data: {last_exc}")
+
+    @staticmethod
+    def _parse_timestamp(raw) -> Optional[datetime]:
+        if not raw:
+            return None
+        raw = str(raw).strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(raw, fmt)
+            except ValueError:
+                continue
+        return None
