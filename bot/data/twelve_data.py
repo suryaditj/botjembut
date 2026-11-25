@@ -22,11 +22,13 @@ INTERVAL_MAP: dict[str, str] = {
     "15min": "15min",
 }
 
-# Mapping simbol display -> simbol API Twelve Data
-# Twelve Data kadang butuh format tanpa slash untuk komoditas/forex tertentu
-SYMBOL_MAP: dict[str, str] = {
+# Hanya simbol berikut yang didukung:
+# - Input simbol bisa berupa "XAUUSD" atau "XAU/USD" -> dinormalisasi ke "XAUUSD"
+# - Input simbol "BTC/USD" -> dipertahankan sebagai "BTC/USD"
+SUPPORTED_SYMBOLS: dict[str, str] = {
+    "XAUUSD": "XAUUSD",
     "XAU/USD": "XAUUSD",
-    "BTC/USD": "BTC/USD",  # crypto biasanya pakai slash
+    "BTC/USD": "BTC/USD",
 }
 
 
@@ -60,6 +62,15 @@ class TwelveDataAdapter:
         self.max_retries = max_retries if max_retries is not None else settings.TWELVE_MAX_RETRIES
         self._session = requests.Session()
 
+    @staticmethod
+    def _resolve_symbol(symbol: str) -> str:
+        normalized = symbol.strip().upper()
+        if normalized not in SUPPORTED_SYMBOLS:
+            raise TwelveDataError(
+                f"Simbol tidak didukung: {symbol}. Hanya mendukung XAUUSD dan BTC/USD."
+            )
+        return SUPPORTED_SYMBOLS[normalized]
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -73,8 +84,7 @@ class TwelveDataAdapter:
         if interval not in INTERVAL_MAP:
             raise TwelveDataError(f"Interval tidak didukung: {interval}")
 
-        # Konversi simbol ke format API Twelve Data
-        api_symbol = SYMBOL_MAP.get(symbol, symbol)
+        api_symbol = self._resolve_symbol(symbol)
 
         params = {
             "symbol": api_symbol,
@@ -139,7 +149,16 @@ class TwelveDataAdapter:
                 break
 
             if resp.status_code == 200:
-                return resp.json()
+                data = resp.json()
+                if isinstance(data, dict) and data.get("status") == "error":
+                    code = data.get("code")
+                    msg = data.get("message") or "Error tidak diketahui dari Twelve Data"
+                    if code == 401:
+                        raise TwelveDataAuthError(f"API key Twelve Data tidak valid: {msg}")
+                    if code == 429:
+                        raise TwelveDataRateLimitError(f"Rate limit Twelve Data tercapai: {msg}")
+                    raise TwelveDataError(f"Twelve Data error {code}: {msg}")
+                return data
 
             if resp.status_code == 401:
                 raise TwelveDataAuthError("API key Twelve Data tidak valid (401)")
@@ -148,7 +167,6 @@ class TwelveDataAdapter:
             if resp.status_code == 403:
                 raise TwelveDataAuthError("Akses ditolak Twelve Data (403)")
 
-            # Error lain: baca body untuk pesan
             try:
                 data = resp.json()
             except ValueError:
